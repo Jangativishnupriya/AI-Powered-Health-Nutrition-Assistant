@@ -1,0 +1,15 @@
+# Compiled Java files
+*.class
+
+# IDE files
+.metadata/
+.settings/
+.project
+.classpath
+
+# Build output
+build/
+target/
+
+# Secrets and local configuration
+.env
