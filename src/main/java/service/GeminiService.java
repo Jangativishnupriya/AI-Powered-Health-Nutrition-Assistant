@@ -1,3 +1,4 @@
+
 package service;
 
 import java.io.IOException;
@@ -5,6 +6,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 
 public class GeminiService {
 
@@ -50,15 +52,16 @@ public class GeminiService {
                 + "{"
                 + "\"parts\":["
                 + "{"
-                + "\"text\":"
-                + jsonString(prompt)
+                + "\"text\":" + jsonString(prompt)
                 + "}"
                 + "]"
                 + "}"
                 + "]"
                 + "}";
 
-        HttpClient client = HttpClient.newHttpClient();
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(20))
+                .build();
 
         int maxAttempts = 3;
 
@@ -67,9 +70,9 @@ public class GeminiService {
                 attempt <= maxAttempts;
                 attempt++) {
 
-            HttpRequest request =
-                    HttpRequest.newBuilder()
+            HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(API_URL))
+                    .timeout(Duration.ofSeconds(60))
                     .header("Content-Type", "application/json")
                     .header("x-goog-api-key", API_KEY)
                     .POST(
@@ -83,16 +86,29 @@ public class GeminiService {
                             HttpResponse.BodyHandlers.ofString()
                     );
 
-            System.out.println("Medical Gemini Attempt: " + attempt);
-            System.out.println("Gemini Status: " + response.statusCode());
+            int status = response.statusCode();
+
+            System.out.println(
+                    "Medical Gemini Attempt: " + attempt
+            );
+
+            System.out.println(
+                    "Gemini Status: " + status
+            );
 
             // SUCCESS
-            if (response.statusCode() == 200) {
+            if (status == 200) {
+                System.out.println("Gemini response received successfully.");
                 return extractText(response.body());
             }
 
-            // 503 - RETRY
-            if (response.statusCode() == 503) {
+            // LOG ACTUAL ERROR DETAILS
+            System.err.println(
+                    "Gemini Error Details: " + response.body()
+            );
+
+            // 503 - SERVICE UNAVAILABLE
+            if (status == 503) {
 
                 if (attempt < maxAttempts) {
 
@@ -107,15 +123,13 @@ public class GeminiService {
                     continue;
                 }
 
-                return "Gemini is temporarily unavailable "
-                        + "because the model is experiencing "
-                        + "high demand. Please try again later.";
+                return "Gemini is temporarily unavailable. "
+                        + "Please try again later.";
             }
 
-            // OTHER ERRORS
+            // OTHER API ERRORS
             System.err.println(
-                    "Gemini API request failed with status: "
-                    + response.statusCode()
+                    "Gemini API request failed with status: " + status
             );
 
             return "Sorry, the AI service could not "
@@ -133,7 +147,6 @@ public class GeminiService {
         try {
 
             String searchText = "\"text\":";
-
             int textIndex = json.indexOf(searchText);
 
             if (textIndex == -1) {
@@ -217,7 +230,7 @@ public class GeminiService {
         }
     }
 
-    // JSON STRING
+    // JSON STRING ESCAPING
     private String jsonString(String text) {
 
         return "\""
