@@ -1,3 +1,4 @@
+
 package com.controller;
 
 import java.io.IOException;
@@ -12,6 +13,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.Part;
 
 import service.NutritionGeminiService;
+import service.GroqNutritionService;
 
 @WebServlet("/NutritionChatbotController")
 @MultipartConfig(
@@ -28,191 +30,157 @@ public class NutritionChatbotController extends HttpServlet {
             HttpServletResponse response)
             throws ServletException, IOException {
 
-        // =========================================
-        // GET UPLOADED IMAGE
-        // =========================================
+        Part foodImage = request.getPart("foodImage");
 
-        Part foodImage =
-                request.getPart("foodImage");
+        System.out.println("=================================");
+        System.out.println("Nutrition Chatbot Request");
 
-        System.out.println(
-                "================================="
-        );
-
-        System.out.println(
-                "Nutrition Chatbot Request"
-        );
-
-        // =========================================
-        // CHECK IMAGE
-        // =========================================
-
-        if (foodImage == null
-                || foodImage.getSize() == 0) {
+        // Check image
+        if (foodImage == null || foodImage.getSize() == 0) {
 
             request.setAttribute(
                     "aiResponse",
                     "Please select a food image first."
             );
 
-            request.getRequestDispatcher(
-                    "Nutrition.jsp"
-            ).forward(
-                    request,
-                    response
-            );
-
+            request.getRequestDispatcher("Nutrition.jsp")
+                   .forward(request, response);
             return;
         }
 
-        // =========================================
-        // GET IMAGE INFORMATION
-        // =========================================
+        // Get image information
+        String fileName = foodImage.getSubmittedFileName();
+        String contentType = foodImage.getContentType();
 
-        String fileName =
-                foodImage.getSubmittedFileName();
+        System.out.println("File Name: " + fileName);
+        System.out.println("Content Type: " + contentType);
+        System.out.println("File Size: " + foodImage.getSize() + " bytes");
 
-        String contentType =
-                foodImage.getContentType();
-
-        long fileSize =
-                foodImage.getSize();
-
-        System.out.println(
-                "File Name: "
-                + fileName
-        );
-
-        System.out.println(
-                "Content Type: "
-                + contentType
-        );
-
-        System.out.println(
-                "File Size: "
-                + fileSize
-                + " bytes"
-        );
-
-        // =========================================
-        // CHECK IMAGE TYPE
-        // =========================================
-
-        if (contentType == null
-                || !contentType.startsWith("image/")) {
+        // Validate image
+        if (contentType == null || !contentType.startsWith("image/")) {
 
             request.setAttribute(
                     "aiResponse",
                     "Please upload a valid food image."
             );
 
-            request.getRequestDispatcher(
-                    "Nutrition.jsp"
-            ).forward(
-                    request,
-                    response
-            );
-
+            request.getRequestDispatcher("Nutrition.jsp")
+                   .forward(request, response);
             return;
         }
 
-        // =========================================
-        // READ IMAGE BYTES
-        // =========================================
+        // Read image
+        try (InputStream imageInputStream = foodImage.getInputStream()) {
 
-        try (
-            InputStream imageInputStream =
-                    foodImage.getInputStream()
-        ) {
+            byte[] imageBytes = imageInputStream.readAllBytes();
 
-            byte[] imageBytes =
-                    imageInputStream.readAllBytes();
+            System.out.println("Image successfully received.");
+            System.out.println("Image bytes: " + imageBytes.length);
 
-            System.out.println(
-                    "Image successfully received."
-            );
-
-            System.out.println(
-                    "Image bytes: "
-                    + imageBytes.length
-            );
+            String aiResponse;
 
             // =====================================
-            // CREATE GEMINI SERVICE
-            // =====================================
-
-            NutritionGeminiService nutritionService =
-                    new NutritionGeminiService();
-
-            // =====================================
-            // CALL GEMINI
+            // FIRST: TRY GEMINI
             // =====================================
 
             try {
 
-                String aiResponse =
-                        nutritionService.analyzeFood(
-                                imageBytes,
-                                contentType
-                        );
+                System.out.println("Calling Gemini Nutrition Service...");
 
-                // =================================
-                // SEND AI RESPONSE TO JSP
-                // =================================
+                NutritionGeminiService nutritionService =
+                        new NutritionGeminiService();
 
-                request.setAttribute(
-                        "aiResponse",
-                        aiResponse
+                aiResponse = nutritionService.analyzeFood(
+                        imageBytes,
+                        contentType
+                );
+
+                // Some service implementations return error
+                // messages instead of throwing exceptions.
+                if (aiResponse == null
+                        || aiResponse.isBlank()
+                        || aiResponse.contains("RESOURCE_EXHAUSTED")
+                        || aiResponse.toLowerCase().contains("quota")
+                        || aiResponse.contains("Gemini API failed")
+                        || aiResponse.contains("Gemini API request limit")) {
+
+                    throw new IOException(
+                            "Gemini quota or service error."
+                    );
+                }
+
+                System.out.println(
+                        "Gemini Nutrition Response Received Successfully!"
                 );
 
             } catch (InterruptedException e) {
 
-                /*
-                 * The current thread was interrupted
-                 * while waiting for Gemini response.
-                 */
-
                 Thread.currentThread().interrupt();
 
-                e.printStackTrace();
-
-                request.setAttribute(
-                        "aiResponse",
-                        "The AI service request was "
-                        + "interrupted. Please try again."
+                System.err.println(
+                        "Gemini request interrupted: " + e.getMessage()
                 );
 
-            } catch (IOException e) {
+                aiResponse =
+                        "The nutrition analysis request was interrupted. "
+                        + "Please try again.";
 
-                /*
-                 * Problem while communicating
-                 * with Gemini API.
-                 */
+            } catch (Exception geminiError) {
 
-                e.printStackTrace();
-
-                request.setAttribute(
-                        "aiResponse",
-                        "Unable to connect to the AI "
-                        + "nutrition service. "
-                        + "Please try again later."
+                System.err.println(
+                        "Gemini Nutrition Failed: "
+                        + geminiError.getMessage()
                 );
+
+                // =================================
+                // SECOND: TRY GROQ VISION BACKUP
+                // =================================
+
+                try {
+
+                    System.out.println(
+                            "Switching to Groq Nutrition Backup..."
+                    );
+
+                    aiResponse = GroqNutritionService.analyzeFood(
+                            imageBytes,
+                            contentType
+                    );
+
+                    if (aiResponse == null || aiResponse.isBlank()) {
+                        throw new IOException(
+                                "Groq returned an empty response."
+                        );
+                    }
+
+                    System.out.println(
+                            "Groq Nutrition Response Received Successfully!"
+                    );
+
+                } catch (Exception groqError) {
+
+                    System.err.println(
+                            "Groq Nutrition Backup Failed: "
+                            + groqError.getMessage()
+                    );
+
+                    groqError.printStackTrace();
+
+                    aiResponse =
+                            "Sorry, both Gemini and Groq nutrition "
+                            + "services are currently unavailable. "
+                            + "Please try again later.";
+                }
             }
+
+            // Send response to JSP
+            request.setAttribute("aiResponse", aiResponse);
         }
 
-        // =========================================
-        // RETURN TO NUTRITION.JSP
-        // =========================================
+        // Return to Nutrition.jsp
+        request.getRequestDispatcher("Nutrition.jsp")
+               .forward(request, response);
 
-        request.getRequestDispatcher(
-                "Nutrition.jsp"
-        ).forward(
-                request,
-                response
-        );
-
-        System.out.println(
-                "================================="
-        );
+        System.out.println("=================================");
     }
 }

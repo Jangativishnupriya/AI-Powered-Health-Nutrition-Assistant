@@ -1,8 +1,9 @@
-
 <%@ page language="java" contentType="text/html; charset=UTF-8"
     pageEncoding="UTF-8"%>
 
 <%!
+    // ================= HTML ESCAPING =================
+
     private String escapeHtml(String text) {
         if (text == null) return "";
 
@@ -13,27 +14,162 @@
                    .replace("'", "&#39;");
     }
 
-    private String formatBoldText(String text) {
+    // ================= INLINE MARKDOWN =================
+
+    private String formatInline(String text) {
         if (text == null) return "";
 
-        return text.replaceAll(
-            "\\*\\*(.*?)\\*\\*",
+        String formatted = escapeHtml(text);
+
+        // Bold text
+        formatted = formatted.replaceAll(
+            "\\*\\*(.+?)\\*\\*",
             "<strong>$1</strong>"
+        );
+
+        // Italic text
+        formatted = formatted.replaceAll(
+            "(?<!\\*)\\*([^*]+)\\*(?!\\*)",
+            "<em>$1</em>"
+        );
+
+        // Inline code
+        formatted = formatted.replaceAll(
+            "`([^`]+)`",
+            "<code class='ai-inline-code'>$1</code>"
+        );
+
+        // Convert escaped HTML line breaks
+        formatted = formatted.replaceAll(
+            "(?i)&lt;br\\s*/?&gt;",
+            "<br>"
+        );
+
+        return formatted;
+    }
+
+    // ================= CLOSE LISTS =================
+
+    private void closeLists(
+            StringBuilder html,
+            boolean insideList,
+            boolean insideOrderedList) {
+
+        if (insideList) {
+            html.append("</ul>");
+        }
+
+        if (insideOrderedList) {
+            html.append("</ol>");
+        }
+    }
+
+    // ================= TABLE HELPERS =================
+
+    private boolean isTableSeparator(String line) {
+
+        return line.matches(
+            "^\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)+\\|?$"
         );
     }
 
+    private String[] getTableCells(String line) {
+
+        String cleaned = line.trim();
+
+        if (cleaned.startsWith("|")) {
+            cleaned = cleaned.substring(1);
+        }
+
+        if (cleaned.endsWith("|")) {
+            cleaned = cleaned.substring(
+                0, cleaned.length() - 1
+            );
+        }
+
+        return cleaned.split("\\|", -1);
+    }
+
+    // ================= FORMAT MARKDOWN TABLE =================
+
+    private void formatTable(
+            StringBuilder html,
+            String headerLine,
+            String[] lines,
+            int[] currentIndex) {
+
+        String[] headers = getTableCells(headerLine);
+
+        html.append("<div class='ai-table-wrapper'>");
+        html.append("<table class='ai-table'>");
+
+        // Header
+        html.append("<thead><tr>");
+
+        for (String header : headers) {
+
+            html.append("<th>")
+                .append(formatInline(header.trim()))
+                .append("</th>");
+        }
+
+        html.append("</tr></thead>");
+        html.append("<tbody>");
+
+        // Rows
+        while (currentIndex[0] + 1 < lines.length) {
+
+            String row = lines[currentIndex[0] + 1].trim();
+
+            if (!row.startsWith("|") || !row.endsWith("|")) {
+                break;
+            }
+
+            currentIndex[0]++;
+
+            String[] cells = getTableCells(row);
+
+            html.append("<tr>");
+
+            for (int j = 0; j < headers.length; j++) {
+
+                String cell = j < cells.length
+                        ? cells[j].trim()
+                        : "";
+
+                html.append("<td>")
+                    .append(formatInline(cell))
+                    .append("</td>");
+            }
+
+            html.append("</tr>");
+        }
+
+        html.append("</tbody>");
+        html.append("</table>");
+        html.append("</div>");
+    }
+
+    // ================= MAIN AI RESPONSE FORMATTER =================
+
     private String formatAIResponse(String text) {
-        if (text == null || text.trim().isEmpty()) return "";
+
+        if (text == null || text.trim().isEmpty()) {
+            return "";
+        }
 
         StringBuilder html = new StringBuilder();
+
         String[] lines = text.split("\\r?\\n", -1);
 
         boolean insideList = false;
         boolean insideOrderedList = false;
 
-        for (String originalLine : lines) {
-            String line = originalLine.trim();
+        for (int i = 0; i < lines.length; i++) {
 
+            String line = lines[i].trim();
+
+            // Remove unnecessary Markdown escaping
             line = line.replace("\\###", "###")
                        .replace("\\##", "##")
                        .replace("\\#", "#")
@@ -41,88 +177,128 @@
                        .replace("\\-", "-")
                        .replace("\\>", ">");
 
+            // Empty lines
             if (line.isEmpty()) {
-                if (insideList) {
-                    html.append("</ul>");
-                    insideList = false;
-                }
 
-                if (insideOrderedList) {
-                    html.append("</ol>");
-                    insideOrderedList = false;
-                }
+                closeLists(
+                    html,
+                    insideList,
+                    insideOrderedList
+                );
+
+                insideList = false;
+                insideOrderedList = false;
+
+                continue;
+            }
+
+            // Markdown tables
+            if (line.startsWith("|")
+                    && line.endsWith("|")
+                    && i + 1 < lines.length
+                    && isTableSeparator(lines[i + 1].trim())) {
+
+                closeLists(
+                    html,
+                    insideList,
+                    insideOrderedList
+                );
+
+                insideList = false;
+                insideOrderedList = false;
+
+                // Skip separator row
+                i++;
+
+                int[] currentIndex = {i};
+
+                formatTable(
+                    html,
+                    line,
+                    lines,
+                    currentIndex
+                );
+
+                i = currentIndex[0];
 
                 continue;
             }
 
             // Horizontal rules
             if (line.matches("^(-{3,}|\\*{3,}|_{3,})$")) {
-                if (insideList) {
-                    html.append("</ul>");
-                    insideList = false;
-                }
 
-                if (insideOrderedList) {
-                    html.append("</ol>");
-                    insideOrderedList = false;
-                }
+                closeLists(
+                    html,
+                    insideList,
+                    insideOrderedList
+                );
+
+                insideList = false;
+                insideOrderedList = false;
 
                 html.append("<hr class='ai-divider'>");
+
                 continue;
             }
 
-            // Markdown headings
-            if (line.startsWith("### ")
-                    || line.startsWith("## ")
-                    || line.startsWith("# ")) {
+            // Markdown headings: #, ##, ###, ####
+            if (line.matches("^#{1,4}\\s+.*")) {
 
-                if (insideList) {
-                    html.append("</ul>");
-                    insideList = false;
+                closeLists(
+                    html,
+                    insideList,
+                    insideOrderedList
+                );
+
+                insideList = false;
+                insideOrderedList = false;
+
+                int headingLevel = 0;
+
+                while (headingLevel < line.length()
+                        && line.charAt(headingLevel) == '#') {
+
+                    headingLevel++;
                 }
 
-                if (insideOrderedList) {
-                    html.append("</ol>");
-                    insideOrderedList = false;
-                }
-
-                int prefixLength = line.startsWith("### ") ? 4
-                                 : line.startsWith("## ") ? 3 : 2;
-
-                String heading = line.substring(prefixLength).trim();
+                String heading = line.substring(
+                    headingLevel
+                ).trim();
 
                 html.append("<h4 class='ai-heading'>")
-                    .append(formatBoldText(escapeHtml(heading)))
+                    .append(formatInline(heading))
                     .append("</h4>");
 
                 continue;
             }
 
-            // Important notes and blockquotes
+            // Blockquotes and important notes
             if (line.startsWith(">")) {
-                if (insideList) {
-                    html.append("</ul>");
-                    insideList = false;
-                }
 
-                if (insideOrderedList) {
-                    html.append("</ol>");
-                    insideOrderedList = false;
-                }
+                closeLists(
+                    html,
+                    insideList,
+                    insideOrderedList
+                );
+
+                insideList = false;
+                insideOrderedList = false;
 
                 String note = line.substring(1).trim();
 
                 html.append("<div class='ai-note'>")
                     .append("<i class='bi bi-info-circle-fill'></i>")
                     .append("<span>")
-                    .append(formatBoldText(escapeHtml(note)))
-                    .append("</span></div>");
+                    .append(formatInline(note))
+                    .append("</span>")
+                    .append("</div>");
 
                 continue;
             }
 
             // Numbered lists
             if (line.matches("^\\d+\\.\\s+.*")) {
+
                 if (insideList) {
                     html.append("</ul>");
                     insideList = false;
@@ -133,17 +309,23 @@
                     insideOrderedList = true;
                 }
 
-                String item = line.replaceFirst("^\\d+\\.\\s+", "");
+                String item = line.replaceFirst(
+                    "^\\d+\\.\\s+",
+                    ""
+                );
 
                 html.append("<li>")
-                    .append(formatBoldText(escapeHtml(item)))
+                    .append(formatInline(item))
                     .append("</li>");
 
                 continue;
             }
 
             // Bullet lists
-            if (line.startsWith("* ") || line.startsWith("- ")) {
+            if (line.startsWith("* ")
+                    || line.startsWith("- ")
+                    || line.startsWith("• ")) {
+
                 if (insideOrderedList) {
                     html.append("</ol>");
                     insideOrderedList = false;
@@ -157,30 +339,32 @@
                 String item = line.substring(2).trim();
 
                 html.append("<li>")
-                    .append(formatBoldText(escapeHtml(item)))
+                    .append(formatInline(item))
                     .append("</li>");
 
                 continue;
             }
 
             // Normal paragraphs
-            if (insideList) {
-                html.append("</ul>");
-                insideList = false;
-            }
+            closeLists(
+                html,
+                insideList,
+                insideOrderedList
+            );
 
-            if (insideOrderedList) {
-                html.append("</ol>");
-                insideOrderedList = false;
-            }
+            insideList = false;
+            insideOrderedList = false;
 
             html.append("<p class='ai-paragraph'>")
-                .append(formatBoldText(escapeHtml(line)))
+                .append(formatInline(line))
                 .append("</p>");
         }
 
-        if (insideList) html.append("</ul>");
-        if (insideOrderedList) html.append("</ol>");
+        closeLists(
+            html,
+            insideList,
+            insideOrderedList
+        );
 
         return html.toString();
     }
@@ -202,8 +386,11 @@
 <html lang="en">
 
 <head>
+
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
 
     <title>Medical Chatbot | HealthCare</title>
 
@@ -223,6 +410,7 @@
         rel="stylesheet">
 
     <style>
+
         * {
             margin: 0;
             padding: 0;
@@ -509,6 +697,10 @@
             font-weight: 700;
         }
 
+        .response-text em {
+            color: #9ff3e4;
+        }
+
         .ai-heading {
             margin: 22px 0 12px;
             font-size: 19px;
@@ -572,6 +764,61 @@
             flex-shrink: 0;
         }
 
+        /* ================= AI RESPONSE TABLE ================= */
+
+        .ai-table-wrapper {
+            width: 100%;
+            max-width: 100%;
+            overflow-x: auto;
+            margin: 18px 0 24px;
+            border-radius: 12px;
+            border: 1px solid rgba(114, 230, 210, 0.25);
+        }
+
+        .ai-table {
+            width: 100%;
+            min-width: 450px;
+            border-collapse: collapse;
+            color: rgba(255, 255, 255, 0.86);
+            font-size: 14px;
+            line-height: 1.7;
+        }
+
+        .ai-table th {
+            padding: 14px 16px;
+            text-align: left;
+            background: rgba(114, 230, 210, 0.16);
+            color: #9ff3e4;
+            font-weight: 700;
+            border-bottom: 1px solid rgba(114, 230, 210, 0.25);
+        }
+
+        .ai-table td {
+            padding: 14px 16px;
+            vertical-align: top;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+        }
+
+        .ai-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .ai-table tbody tr:hover {
+            background: rgba(114, 230, 210, 0.06);
+        }
+
+        .ai-table strong {
+            color: white;
+        }
+
+        .ai-inline-code {
+            padding: 2px 6px;
+            border-radius: 5px;
+            background: rgba(114, 230, 210, 0.12);
+            color: #9ff3e4;
+            font-size: 0.9em;
+        }
+
         /* ================= DISCLAIMER ================= */
 
         .disclaimer {
@@ -592,7 +839,7 @@
             margin-right: 6px;
         }
 
-        /* ================= FOOTER — SAME AS Home.jsp ================= */
+        /* ================= FOOTER ================= */
 
         footer {
             width: 100%;
@@ -620,6 +867,7 @@
         /* ================= TABLET ================= */
 
         @media (max-width: 991px) {
+
             .navbar-custom {
                 padding: 12px 18px;
             }
@@ -632,6 +880,7 @@
         /* ================= MOBILE ================= */
 
         @media (max-width: 576px) {
+
             .navbar-custom {
                 width: 96%;
                 padding: 10px 15px;
@@ -665,20 +914,34 @@
             .response-text {
                 font-size: 14px;
             }
+
+            .ai-table {
+                font-size: 13px;
+            }
+
+            .ai-table th,
+            .ai-table td {
+                padding: 11px 12px;
+            }
         }
+
     </style>
+
 </head>
 
 <body>
 
-    <!-- NAVBAR: HOME, NUTRITION, LOGOUT -->
+    <!-- ================= NAVBAR ================= -->
 
     <nav class="navbar navbar-expand-lg navbar-dark navbar-custom">
+
         <div class="container-fluid">
 
             <a class="navbar-brand brand" href="Dashboard.jsp">
+
                 <i class="bi bi-heart-pulse-fill"></i>
                 HealthCare
+
             </a>
 
             <button
@@ -691,46 +954,64 @@
                 aria-label="Toggle navigation">
 
                 <span class="navbar-toggler-icon"></span>
+
             </button>
 
             <div class="collapse navbar-collapse" id="navbarMenu">
+
                 <ul class="navbar-nav ms-auto align-items-lg-center">
 
                     <li class="nav-item">
+
                         <a class="nav-link" href="Dashboard.jsp">
                             Home
                         </a>
+
                     </li>
 
                     <li class="nav-item">
+
                         <a class="nav-link" href="Nutrition.jsp">
                             Nutrition
                         </a>
+
                     </li>
 
                     <li class="nav-item">
+
                         <a class="nav-link logout-link"
                            href="LogoutController">
+
                             <i class="bi bi-box-arrow-right me-1"></i>
                             Logout
+
                         </a>
+
                     </li>
 
                 </ul>
+
             </div>
+
         </div>
+
     </nav>
 
-    <!-- MAIN SECTION -->
+    <!-- ================= MAIN SECTION ================= -->
 
     <main class="medical-section">
+
         <div class="medical-container">
+
+            <!-- PAGE HEADING -->
 
             <div class="page-heading">
 
                 <div class="hero-tag">
+
                     <i class="bi bi-heart-pulse me-1"></i>
                     Smart Healthcare Assistant
+
                 </div>
 
                 <h1>Medical Assistant</h1>
@@ -749,8 +1030,10 @@
                 <form action="MedicalChatbotController" method="post">
 
                     <label class="question-label" for="question">
+
                         <i class="bi bi-chat-left-heart-fill"></i>
                         Ask your medical question
+
                     </label>
 
                     <textarea
@@ -761,61 +1044,83 @@
                         required><%= escapeHtml(question) %></textarea>
 
                     <div class="ask-wrapper">
+
                         <button type="submit" class="ask-btn">
+
                             <i class="bi bi-heart-pulse-fill"></i>
                             Ask
+
                         </button>
+
                     </div>
 
                 </form>
 
-                <!-- AI RESPONSE -->
+                <!-- ================= AI RESPONSE ================= -->
 
                 <% if (aiResponse != null && !aiResponse.trim().isEmpty()) { %>
 
                     <div class="response-box">
 
                         <div class="response-header">
+
                             <i class="bi bi-robot"></i>
+
                             <h3>Medical Assistant</h3>
+
                         </div>
 
                         <div class="response-text">
+
                             <%= formatAIResponse(aiResponse) %>
+
                         </div>
 
                     </div>
 
                 <% } %>
 
-                <!-- MEDICAL DISCLAIMER -->
+                <!-- ================= DISCLAIMER ================= -->
 
                 <div class="disclaimer">
+
                     <i class="bi bi-exclamation-triangle-fill"></i>
+
                     <strong>Important:</strong>
+
                     This AI assistant provides general health information
                     only. It is not a substitute for professional medical
                     advice, diagnosis, or treatment. If you have serious
                     or emergency symptoms, consult a qualified doctor or
                     seek immediate medical care.
+
                 </div>
 
             </div>
+
         </div>
+
     </main>
 
-    <!-- SAME FOOTER AS Home.jsp -->
+    <!-- ================= FOOTER ================= -->
 
     <footer>
+
         <p>
+
             © 2026 <span>HealthCare</span>. Built to promote better health
             awareness and informed living.
+
         </p>
+
     </footer>
 
     <!-- Bootstrap JavaScript -->
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script
+        src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js">
+    </script>
 
 </body>
+
 </html>

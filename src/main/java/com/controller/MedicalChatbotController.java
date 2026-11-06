@@ -1,4 +1,3 @@
-
 package com.controller;
 
 import java.io.IOException;
@@ -10,135 +9,99 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import service.GeminiService;
+import service.GroqService;
 
 @WebServlet("/MedicalChatbotController")
 public class MedicalChatbotController extends HttpServlet {
 
     private static final long serialVersionUID = 1L;
 
-
     @Override
-    protected void doPost(HttpServletRequest request,
-                           HttpServletResponse response)
+    protected void doPost(
+            HttpServletRequest request,
+            HttpServletResponse response)
             throws ServletException, IOException {
 
+        String question = request.getParameter("question");
 
-        // =========================================
-        // GET USER QUESTION
-        // =========================================
+        request.setAttribute("question", question);
 
-        String question =
-                request.getParameter("question");
+        System.out.println("Medical Chatbot Request Received");
 
-
-        // Send question back to Medical.jsp
-        // so it can remain in the textarea
-        request.setAttribute(
-                "question",
-                question
-        );
-
-
-        System.out.println(
-                "================================="
-        );
-
-        System.out.println(
-                "Medical Chatbot Request"
-        );
-
-        System.out.println(
-                "User Question: " + question
-        );
-
-        System.out.println(
-                "================================="
-        );
-
-
-        // =========================================
         // CHECK EMPTY QUESTION
-        // =========================================
-
-        if (question == null
-                || question.trim().isEmpty()) {
-
+        if (question == null || question.trim().isEmpty()) {
 
             request.setAttribute(
                     "aiResponse",
                     "Please enter a medical question."
             );
 
-
-            request.getRequestDispatcher(
-                    "Medical.jsp"
-            ).forward(
-                    request,
-                    response
-            );
-
+            request.getRequestDispatcher("Medical.jsp")
+                    .forward(request, response);
 
             return;
         }
 
+        String aiResponse;
 
-        // =========================================
-        // CALL GEMINI
-        // =========================================
-
+        // FIRST: TRY GEMINI
         try {
-
-
-            // Create Gemini service object
-            GeminiService geminiService =
-                    new GeminiService();
-
 
             System.out.println("Calling Gemini Service...");
 
-            String aiResponse =
-                    geminiService.getMedicalResponse(
-                            question.trim()
-                    );
+            GeminiService geminiService = new GeminiService();
 
-            System.out.println("Gemini Service Returned Successfully!");
-
-
-            // Send Gemini response to Medical.jsp
-            request.setAttribute(
-                    "aiResponse",
-                    aiResponse
+            aiResponse = geminiService.getMedicalResponse(
+                    question.trim()
             );
 
+            // Detect errors returned as text instead of exceptions
+            if (aiResponse == null || aiResponse.isBlank()
+                    || aiResponse.contains("Gemini API failed with status:")
+                    || aiResponse.contains("RESOURCE_EXHAUSTED")
+                    || aiResponse.toLowerCase().contains("quota exceeded")) {
 
-        } catch (Exception e) {
+                throw new IOException("Gemini quota or service error.");
+            }
 
+            System.out.println("Gemini Response Received Successfully!");
 
-            // Print error in Eclipse/Tomcat console
-            e.printStackTrace();
+        } catch (Exception geminiError) {
 
-
-            // Show user-friendly error on JSP
-            request.setAttribute(
-                    "aiResponse",
-                    "Sorry, I could not process your request "
-                    + "right now. Please try again later."
+            System.err.println(
+                    "Gemini failed: " + geminiError.getMessage()
             );
 
+            // SECOND: TRY GROQ BACKUP
+            try {
+
+                System.out.println("Switching to Groq Backup...");
+
+                aiResponse = GroqService.generateResponse(
+                        question.trim()
+                );
+
+                System.out.println("Groq Response Received Successfully!");
+
+            } catch (Exception groqError) {
+
+                System.err.println(
+                        "Groq Backup Failed: " + groqError.getMessage()
+                );
+
+                groqError.printStackTrace();
+
+                aiResponse =
+                        "Sorry, both AI services are currently unavailable. "
+                        + "Please try again later or consult a qualified "
+                        + "healthcare professional for medical concerns.";
+            }
         }
 
+        request.setAttribute("aiResponse", aiResponse);
 
-        // =========================================
-        // RETURN TO MEDICAL.JSP
-        // =========================================
-
-        request.getRequestDispatcher(
-                "Medical.jsp"
-        ).forward(
-                request,
-                response
-        );
-
+        // RETURN TO MEDICAL JSP
+        request.getRequestDispatcher("Medical.jsp")
+                .forward(request, response);
     }
-
 }
