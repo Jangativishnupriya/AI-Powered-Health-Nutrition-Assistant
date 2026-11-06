@@ -12,253 +12,251 @@ import com.utility.DBConnection;
 
 public class UserDAO {
 
-	Connection con = null;
-	String status = "fail";
-	DBConnection db = new DBConnection();
+    DBConnection db = new DBConnection();
 
-	public String insertUser(UserModel um) {
+    // ==========================================
+    // INSERT USER
+    // ==========================================
 
-		try {
-			con = db.getConnection();
+    public String insertUser(UserModel um) {
 
-			if (con == null) {
-				System.out.println("Database connection is NULL");
-				return "fail";
-			}
+        String result = "fail";
 
-			String query = "INSERT INTO users " + "(Fullname, email, passwordkey, age, gender) "
-					+ "VALUES (?, ?, ?, ?, ?)";
+        String query = "INSERT INTO users "
+                + "(Fullname, email, passwordkey, age, gender) "
+                + "VALUES (?, ?, ?, ?, ?)";
 
-			PreparedStatement ps = con.prepareStatement(query);
+        try (Connection con = db.getConnection();
+             PreparedStatement ps = con.prepareStatement(query)) {
 
-			ps.setString(1, um.getName());
-			ps.setString(2, um.getEmail());
-			ps.setString(3, um.getPassword());
-			ps.setInt(4, um.getAge());
-			ps.setString(5, um.getGender());
+            if (con == null) {
+                return "fail";
+            }
 
-			int n = ps.executeUpdate();
+            ps.setString(1, um.getName());
+            ps.setString(2, um.getEmail());
+            ps.setString(3, um.getPassword());
+            ps.setInt(4, um.getAge());
+            ps.setString(5, um.getGender());
 
-			if (n > 0) {
-				status = "success";
-			}
+            int rows = ps.executeUpdate();
 
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
+            if (rows > 0) {
+                result = "success";
+            }
 
-		return status;
-	}
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
 
-	public String validateUser(String email, String passwordKey) {
+        return result;
+    }
 
-		con = db.getConnection();
+    // ==========================================
+    // VALIDATE USER
+    // ==========================================
 
-		String query = "SELECT * FROM users WHERE email = ? AND passwordkey = ?";
+    public String validateUser(String email, String passwordKey) {
 
-		try {
-			PreparedStatement st = con.prepareStatement(query);
+        String result = "fail";
 
-			st.setString(1, email);
-			st.setString(2, passwordKey);
+        String query = "SELECT * FROM users "
+                + "WHERE email = ? AND passwordkey = ?";
 
-			ResultSet rs = st.executeQuery();
+        try (Connection con = db.getConnection();
+             PreparedStatement ps = con.prepareStatement(query)) {
 
-			if (rs.next()) {
-				System.out.println("Valid user from UserDAO");
-				status = "success";
-			}
+            ps.setString(1, email);
+            ps.setString(2, passwordKey);
 
-		} catch (SQLException e) {
-			e.printStackTrace();
-		}
+            try (ResultSet rs = ps.executeQuery()) {
 
-		return status;
-	}
-	
-	// =====================================================
-	// GET ALL NORMAL USERS
-	// =====================================================
+                if (rs.next()) {
+                    System.out.println("Valid user from UserDAO");
+                    result = "success";
+                }
+            }
 
-	public List<UserModel> getAllUsers() {
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
 
-	
-		List<UserModel> users = new ArrayList<>();
+        return result;
+    }
 
-		String sql = "SELECT Fullname, email, age, gender, rol, status "
-		           + "FROM users "
-		           + "WHERE rol = 'USER'";
+    // ==========================================
+    // GET ALL NORMAL USERS
+    // ==========================================
 
-		con = db.getConnection();
+    public List<UserModel> getAllUsers() {
 
-		try {
+        List<UserModel> users = new ArrayList<>();
 
-		    PreparedStatement ps = con.prepareStatement(sql);
+        String sql = "SELECT Fullname, email, age, gender, rol, status, "
+                + "CASE "
+                + "WHEN last_activity IS NOT NULL "
+                + "AND last_activity >= CURRENT_TIMESTAMP - INTERVAL 2 MINUTE "
+                + "THEN 'Active' "
+                + "ELSE 'Inactive' "
+                + "END AS activity_status "
+                + "FROM users WHERE rol = 'USER'";
 
-		    ResultSet rs = ps.executeQuery();
+        try (Connection con = db.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
 
-		    while (rs.next()) {
+            while (rs.next()) {
 
-		        UserModel user = new UserModel();
+                UserModel user = new UserModel();
 
-		        user.setName(rs.getString("Fullname"));
-		        user.setEmail(rs.getString("email"));
-		        user.setAge(rs.getInt("age"));
-		        user.setGender(rs.getString("gender"));
-		        user.setRol(rs.getString("rol"));
-		        user.setStatus(rs.getString("status"));
+                user.setName(rs.getString("Fullname"));
+                user.setEmail(rs.getString("email"));
+                user.setAge(rs.getInt("age"));
+                user.setGender(rs.getString("gender"));
+                user.setRol(rs.getString("rol"));
+                user.setStatus(rs.getString("status"));
 
-		        users.add(user);
-		    }
+                // Set live activity status
+                user.setActivityStatus(
+                        rs.getString("activity_status"));
 
-		    rs.close();
-		    ps.close();
-		    con.close();
+                users.add(user);
+            }
 
-		} catch (Exception e) {
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
 
-		    e.printStackTrace();
-		}
+        return users;
+    }
 
-		return users;
-	
+    // ==========================================
+    // UPDATE USER LAST ACTIVITY
+    // ==========================================
 
-		}
+    public void updateLastActivity(String email) {
 
+        String sql = "UPDATE users "
+                + "SET last_activity = CURRENT_TIMESTAMP "
+                + "WHERE email = ? AND rol = 'USER'";
 
-	// =====================================================
-	// ACTIVATE USER
-	// =====================================================
+        try (Connection con = db.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
 
-	public boolean activateUser(String email) {
+            ps.setString(1, email);
+            ps.executeUpdate();
 
-	
-		boolean result = false;
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
 
-		String sql = "UPDATE users "
-		           + "SET status = 'Active' "
-		           + "WHERE email = ? AND rol = 'USER'";
+    // ==========================================
+    // MARK USER INACTIVE
+    // ==========================================
 
-		con = db.getConnection();
+    public void markInactive(String email) {
 
-		try {
+        String sql = "UPDATE users "
+                + "SET last_activity = NULL "
+                + "WHERE email = ? AND rol = 'USER'";
 
-		    PreparedStatement ps = con.prepareStatement(sql);
+        try (Connection con = db.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
 
-		    ps.setString(1, email);
+            ps.setString(1, email);
+            ps.executeUpdate();
 
-		    int rows = ps.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
 
-		    if (rows > 0) {
-		        result = true;
-		    }
+    // ==========================================
+    // DELETE USER
+    // ==========================================
 
-		    ps.close();
-		    con.close();
+    public boolean deleteUser(String email) {
 
-		} catch (Exception e) {
+        String sql = "DELETE FROM users "
+                + "WHERE email = ? AND rol = 'USER'";
 
-		    e.printStackTrace();
-		}
+        try (Connection con = db.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
 
-		return result;
+            ps.setString(1, email);
 
+            int rows = ps.executeUpdate();
 
-		}
+            return rows > 0;
 
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
 
+        return false;
+    }
 
-	// =====================================================
-	// DELETE USER
-	// =====================================================
+    // ==========================================
+    // VALIDATE ADMIN
+    // ==========================================
 
-	public boolean deleteUser(String email) {
+    public String validateAdmin(String fullname, String passwordKey) {
 
-	    boolean result = false;
+        String result = "fail";
 
-	    String sql = "DELETE FROM users "
-	               + "WHERE email = ? AND rol = 'USER'";
+        String query = "SELECT * FROM users "
+                + "WHERE Fullname = ? "
+                + "AND passwordkey = ? "
+                + "AND rol = 'ADMIN'";
 
-	    con = db.getConnection();
+        try (Connection con = db.getConnection();
+             PreparedStatement ps = con.prepareStatement(query)) {
 
-	    try {
+            ps.setString(1, fullname);
+            ps.setString(2, passwordKey);
 
-	        PreparedStatement ps = con.prepareStatement(sql);
+            try (ResultSet rs = ps.executeQuery()) {
 
-	        ps.setString(1, email);
+                if (rs.next()) {
+                    System.out.println("Valid admin found");
+                    result = "success";
+                }
+            }
 
-	        int rows = ps.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
 
-	        if (rows > 0) {
-	            result = true;
-	        }
+        return result;
+    }
 
-	        ps.close();
-	        con.close();
+    // ==========================================
+    // GET USER NAME BY EMAIL
+    // ==========================================
 
-	    } catch (Exception e) {
-	        e.printStackTrace();
-	    }
+    public String getUserNameByEmail(String email) {
 
-	    return result;
-	}
-	
-	public String validateAdmin(String fullname, String passwordKey) {
+        String fullname = null;
 
-	    con = db.getConnection();
+        String query = "SELECT Fullname FROM users WHERE email = ?";
 
-	    String query = "SELECT * FROM users "
-	                 + "WHERE Fullname = ? "
-	                 + "AND passwordkey = ? "
-	                 + "AND rol = 'ADMIN'";
+        try (Connection con = db.getConnection();
+             PreparedStatement ps = con.prepareStatement(query)) {
 
-	    try {
+            ps.setString(1, email);
 
-	        PreparedStatement st = con.prepareStatement(query);
+            try (ResultSet rs = ps.executeQuery()) {
 
-	        st.setString(1, fullname);
-	        st.setString(2, passwordKey);
+                if (rs.next()) {
+                    fullname = rs.getString("Fullname");
+                }
+            }
 
-	        ResultSet rs = st.executeQuery();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
 
-	        if (rs.next()) {
-
-	            System.out.println("Valid admin found");
-	            status = "success";
-	        }
-
-	    } catch (SQLException e) {
-
-	        e.printStackTrace();
-	    }
-
-	    return status;
-	}
-	
-	public String getUserNameByEmail(String email) {
-
-	    String fullname = null;
-
-	    con = db.getConnection();
-
-	    String query = "SELECT Fullname FROM users WHERE email = ?";
-
-	    try {
-
-	        PreparedStatement ps = con.prepareStatement(query);
-
-	        ps.setString(1, email);
-
-	        ResultSet rs = ps.executeQuery();
-
-	        if (rs.next()) {
-	            fullname = rs.getString("Fullname");
-	        }
-
-	    } catch (SQLException e) {
-	        e.printStackTrace();
-	    }
-
-	    return fullname;
-	}
+        return fullname;
+    }
 }
