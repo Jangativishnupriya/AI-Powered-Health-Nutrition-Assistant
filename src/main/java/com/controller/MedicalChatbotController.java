@@ -94,11 +94,14 @@ public class MedicalChatbotController extends HttpServlet {
                     new GeminiService();
 
 
-            // Send question to Gemini
+            System.out.println("Calling Gemini Service...");
+
             String aiResponse =
                     geminiService.getMedicalResponse(
                             question.trim()
                     );
+
+            System.out.println("Gemini Service Returned Successfully!");
 
 
             // Send Gemini response to Medical.jsp
